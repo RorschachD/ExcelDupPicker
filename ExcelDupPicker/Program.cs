@@ -3,11 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ColorConsole;
+using System.Threading;
 using CsvHelper;
-using CsvHelper.Configuration;
 
 namespace ExcelDupPicker
 {
@@ -24,40 +21,51 @@ namespace ExcelDupPicker
             try
             {
                 var filePathList = FileDirectoryGenerator();
-                serverRequestDic = new Dictionary<int, string>();
-                csvFile = new List<List<string>>();
-
-                Console.WriteLine("serverRequestColumn");
-                var serverRequestColumn = int.Parse(Console.ReadLine());
-
-                Console.WriteLine("safeHarbourScoreColumn");
-                var safeHarbourScoreColumn = int.Parse(Console.ReadLine());
 
                 //var workbook = new XLWorkbook();
                 foreach (var filePath in filePathList)
                 {
-                    Console.WriteLine(filePath);
-                    //From Debug folder(Hard coded in)
-                    /*var indexOfFirstFileLetter = filePath.IndexOf("Debug", StringComparison.Ordinal) + 6;
-                    var fileLength = filePath.IndexOf(".", StringComparison.Ordinal) - indexOfFirstFileLetter;
-                    var fileName = filePath.Substring(indexOfFirstFileLetter, fileLength);*/
+                    serverRequestDic = new Dictionary<int, string>();
+                    csvFile = new List<List<string>>();
+
+                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.WriteLine("Please input the column index for the serverRequest...", Console.BackgroundColor);
+                    Console.ResetColor();
+                    var serverRequestColumn = int.Parse(Console.ReadLine());
+
+                    Console.BackgroundColor = ConsoleColor.DarkGreen;
+                    Console.WriteLine("Please input the column index for the safeHarbourScore...", Console.BackgroundColor);
+                    Console.ResetColor();
+                    var safeHarbourScoreColumn = int.Parse(Console.ReadLine());
 
                     BuildServerRequestDic(serverRequestColumn, filePath);
 
                     duplicateLibrary = BuildDuplicateRequestDic();
 
-                    WriteDuplicateIndicator(safeHarbourScoreColumn, filePath);
+                    if (duplicateLibrary.Count() == 0)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Green;
+                        Console.WriteLine("There is no duplicate in file: " + GetFileName(filePath));
+                        Console.WriteLine();
+                        Console.ResetColor();
+                        continue;
+                    }
 
-                    Console.WriteLine("Finished. Press anykey to exit");
+                    WriteDuplicateIndicator(safeHarbourScoreColumn, filePath);
+                    Console.WriteLine("Process finished for " + GetFileName(filePath));
+                    Console.WriteLine("[***********************************************************]");
+                    Console.WriteLine();
                 }
-                //workbook.SaveAs($"Invoice.xlsx");
-                //Console.WriteLine("Total " + clientCount + " has been procressed");
-                Console.WriteLine("Finished. Press anykey to exit");
+                Console.BackgroundColor = ConsoleColor.DarkCyan;
+                Console.WriteLine();
+                Console.WriteLine("All Finished. Press anykey to exit");
                 Console.ReadKey();
             }
             catch (Exception e)
             {
+                Console.BackgroundColor = ConsoleColor.DarkRed;
                 Console.WriteLine(e);
+                Console.ReadKey();
                 throw;
             }
         }
@@ -69,32 +77,60 @@ namespace ExcelDupPicker
             return filePathList;
         }
 
+        private static string GetFileName(string filePath)
+        {
+            var indexOfBackSlash = filePath.LastIndexOf("\\");
+            var fileNameWithExtension = filePath.Substring(indexOfBackSlash);
+            var indexOfComma = fileNameWithExtension.LastIndexOf(".");
+            var fileName = fileNameWithExtension.Substring(1, indexOfComma - 1);
+
+            return fileName;
+        }
+
         private static void BuildServerRequestDic(int serverRequestColumn, string filePath)
         {
+            var recordsLength = 0;
+            using (StreamReader sr = File.OpenText(filePath))
+            {
+                while (sr.ReadLine() != null)
+                {
+                    recordsLength++;
+                }
+                recordsLength--;
+            }
+
             var reader = new StreamReader(filePath);
             var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
             var rowIndex = 0;
-            while (csv.Read())
+            var progressInterval = (double) 100 / recordsLength;
+            Console.WriteLine("Building Server Request Dictionary...");
+            using (var progress = new ProgressBar())
             {
-                if (rowIndex == 0)
+                while (csv.Read())
                 {
+                    if (rowIndex == 0)
+                    {
+                        csvFile.Add(csv.Parser.Record.ToList());
+                        rowIndex++;
+                        continue;
+                    }
+                    var serverRequest = csv[serverRequestColumn - 1];
+                    var referenceIndex = serverRequest.IndexOf("clientReference");
+                    var requestWithoutReferenceTitle = serverRequest.Substring(referenceIndex + 20);
+                    var commaIndex = requestWithoutReferenceTitle.IndexOf(",");
+                    var finalRequest = "{" + requestWithoutReferenceTitle.Substring(commaIndex + 3);
+                    serverRequestDic.Add(rowIndex, finalRequest);
                     csvFile.Add(csv.Parser.Record.ToList());
+                    if ((rowIndex - 1) % 10 == 0)
+                    {
+                        progress.Report(progressInterval * rowIndex / 100);
+                        Thread.Sleep(20);
+                    }
                     rowIndex++;
-                    continue;
                 }
-                var serverRequest = csv[serverRequestColumn - 1];
-                Console.WriteLine(serverRequest);
-                var referenceIndex = serverRequest.IndexOf("clientReference");
-                var requestWithoutReferenceTitle = serverRequest.Substring(referenceIndex + 20);
-                var commaIndex = requestWithoutReferenceTitle.IndexOf(",");
-                var finalRequest = "{" + requestWithoutReferenceTitle.Substring(commaIndex + 3);
-                //var finalRequest = $" { {requestWithoutReferenceTitle.Substring(commaIndex + 3)}";
-
-                //Console.WriteLine(finalRequest);
-                serverRequestDic.Add(rowIndex, finalRequest);
-                Console.WriteLine();
-                csvFile.Add(csv.Parser.Record.ToList());
-                rowIndex++;
+                progress.Report((double)100 / 100);
+                Thread.Sleep(1000);
+                Console.WriteLine(" Done.");
             }
             csv.Dispose();
         }
@@ -102,60 +138,52 @@ namespace ExcelDupPicker
         private static IEnumerable<IGrouping<string, int>> BuildDuplicateRequestDic()
         {
             var lookup = serverRequestDic.ToLookup(x => x.Value, x => x.Key).Where(x => x.Count() > 1);
-
-            /*var dasd = lookup.ElementAt(0);
-            var asdsa = dasd.Key;
-            foreach (var item in dasd)
-            {
-                Console.WriteLine(item);
-            }
-            var asdsaa = dasd.ElementAt(0);*/
-
+            
             foreach (var item in lookup)
             {
                 var keys = item.Aggregate("", (s, v) => s + ", " + v);
-                var message = "The following keys have the value " + item.Key + ":" + keys;
-                Console.WriteLine(message);
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("The following request has one or more duplicates: " + item.Key);
+                Console.ResetColor();
+                Console.BackgroundColor = ConsoleColor.DarkGreen;
+                Console.WriteLine("The duplicates occure at data row: " + keys);
+                Console.WriteLine();
+                Console.ResetColor();
             }
-
+            Console.ResetColor();
             return lookup;
         }
 
         private static void WriteDuplicateIndicator(int safeHarbourScoreColumn, string filePath)
         {
-            //var streamWriter = new StreamWriter(filePath);
-            //var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture);
+            foreach (var item in duplicateLibrary)
+            {
+                var skipFirst = true;
+                foreach (var index in item)
+                {
+                    if (skipFirst)
+                    {
+                        skipFirst = false;
+                        continue;
+                    }
+                    csvFile[index][safeHarbourScoreColumn - 1] = "Duplicate";
+                }
+            }
 
+            var fileName = GetFileName(filePath);
 
-            //using (var stream = File.Open("C:\\Users\\Rorschach\\Documents\\Visual Studio 2019\\Project\\ExcelDupPicker\\ExcelDupPicker\\bin\\Debug\\result.csv", FileMode.Append))
-            using (var writer = new StreamWriter("C:\\Users\\Rorschach\\Documents\\Visual Studio 2019\\Project\\ExcelDupPicker\\ExcelDupPicker\\bin\\Debug\\result.csv"))
+            using (var writer = new StreamWriter(Directory.GetCurrentDirectory() + "\\updated " + fileName + ".csv"))
             using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
             {
-                /*foreach (var duplicate in duplicateLibrary)
-                {
-                    foreach (var item in duplicate)
-                    {
-                        csv.WriteRecord()
-                    }
-                }*/
-
                 foreach (var record in csvFile)
                 {
                     foreach (var field in record)
                     {
                         csv.WriteField(field);
                     }
-
                     csv.NextRecord();
                 }
-
             }
-        }
-
-        public class Foo
-        {
-            public int Id { get; set; }
-            public string Name { get; set; }
         }
     }
 }
