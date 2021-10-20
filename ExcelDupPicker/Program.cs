@@ -28,17 +28,7 @@ namespace ExcelDupPicker
                     serverRequestDic = new Dictionary<int, string>();
                     csvFile = new List<List<string>>();
 
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
-                    Console.WriteLine("Please input the column index for the serverRequest...", Console.BackgroundColor);
-                    Console.ResetColor();
-                    var serverRequestColumn = int.Parse(Console.ReadLine());
-
-                    Console.BackgroundColor = ConsoleColor.DarkGreen;
-                    Console.WriteLine("Please input the column index for the safeHarbourScore...", Console.BackgroundColor);
-                    Console.ResetColor();
-                    var safeHarbourScoreColumn = int.Parse(Console.ReadLine());
-
-                    BuildServerRequestDic(serverRequestColumn, filePath);
+                    BuildServerRequestDic(filePath);
 
                     duplicateLibrary = BuildDuplicateRequestDic();
 
@@ -48,12 +38,15 @@ namespace ExcelDupPicker
                         Console.WriteLine("There is no duplicate in file: " + GetFileName(filePath));
                         Console.WriteLine();
                         Console.ResetColor();
+                        Console.WriteLine("Process finished for " + GetFileName(filePath));
+                        Console.WriteLine("[***************************************************************************************************]");
+                        Console.WriteLine();
                         continue;
                     }
 
-                    WriteDuplicateIndicator(safeHarbourScoreColumn, filePath);
+                    WriteDuplicateIndicator(filePath);
                     Console.WriteLine("Process finished for " + GetFileName(filePath));
-                    Console.WriteLine("[***********************************************************]");
+                    Console.WriteLine("[***************************************************************************************************]");
                     Console.WriteLine();
                 }
                 Console.BackgroundColor = ConsoleColor.DarkCyan;
@@ -87,9 +80,10 @@ namespace ExcelDupPicker
             return fileName;
         }
 
-        private static void BuildServerRequestDic(int serverRequestColumn, string filePath)
+        private static void BuildServerRequestDic(string filePath)
         {
             var recordsLength = 0;
+            var serverRequestColumn = 0;
             using (StreamReader sr = File.OpenText(filePath))
             {
                 while (sr.ReadLine() != null)
@@ -111,10 +105,23 @@ namespace ExcelDupPicker
                     if (rowIndex == 0)
                     {
                         csvFile.Add(csv.Parser.Record.ToList());
+
+                        var header = csvFile[0];
+                        var headerIndex = 0;
+                        foreach (var item in header)
+                        {
+                            if (item.Contains("serverRequest"))
+                            {
+                                serverRequestColumn = headerIndex;
+                                break;
+                            }
+                            headerIndex++;
+                        }
+                        
                         rowIndex++;
                         continue;
                     }
-                    var serverRequest = csv[serverRequestColumn - 1];
+                    var serverRequest = csv[serverRequestColumn];
                     var referenceIndex = serverRequest.IndexOf("clientReference");
                     var requestWithoutReferenceTitle = serverRequest.Substring(referenceIndex + 20);
                     var commaIndex = requestWithoutReferenceTitle.IndexOf(",");
@@ -154,8 +161,21 @@ namespace ExcelDupPicker
             return lookup;
         }
 
-        private static void WriteDuplicateIndicator(int safeHarbourScoreColumn, string filePath)
+        private static void WriteDuplicateIndicator(string filePath)
         {
+            var safeHarbourScoreColumn = 0;
+            var header = csvFile[0];
+            var headerIndex = 0;
+            foreach (var item in header)
+            {
+                if (item.Contains("safeHarbourScore"))
+                {
+                    safeHarbourScoreColumn = headerIndex;
+                    break;
+                }
+                headerIndex++;
+            }
+
             foreach (var item in duplicateLibrary)
             {
                 var skipFirst = true;
@@ -166,7 +186,7 @@ namespace ExcelDupPicker
                         skipFirst = false;
                         continue;
                     }
-                    csvFile[index][safeHarbourScoreColumn - 1] = "Duplicate";
+                    csvFile[index][safeHarbourScoreColumn] = "Duplicate";
                 }
             }
 
